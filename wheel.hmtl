@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>X-TEAM WHEEL</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body {
+            background: linear-gradient(135deg, #8B0000 0%, #2F0000 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Cairo', 'Tahoma', sans-serif;
+        }
+        body.shake {
+            animation: shakeBody 0.15s ease-in-out 0s 6;
+        }
+        @keyframes shakeBody {
+            0%,100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        .container {
+            text-align: center;
+            background: rgba(0,0,0,0.5);
+            padding: 30px;
+            border-radius: 60px;
+            backdrop-filter: blur(5px);
+            border: 2px solid #FFD700;
+        }
+        .title {
+            font-size: 32px;
+            font-weight: bold;
+            color: #FFD700;
+            text-shadow: 0 0 10px #FFA500;
+            margin-bottom: 20px;
+            letter-spacing: 2px;
+        }
+        .wheel-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+        canvas {
+            width: 420px;
+            height: 420px;
+            border-radius: 50%;
+            box-shadow: 0 0 0 8px #FFD700, 0 0 0 12px #8B0000, 0 20px 30px black;
+            display: block;
+        }
+        .pointer {
+            position: absolute;
+            top: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 25px solid transparent;
+            border-right: 25px solid transparent;
+            border-top: 55px solid #FF4444;
+            filter: drop-shadow(0 5px 8px black);
+            z-index: 10;
+        }
+        .pointer::after {
+            content: "▼";
+            position: absolute;
+            top: -62px;
+            left: -12px;
+            font-size: 28px;
+            color: #FFD700;
+            text-shadow: 0 0 4px black;
+        }
+        button {
+            margin-top: 35px;
+            padding: 14px 45px;
+            font-size: 28px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            border: none;
+            border-radius: 60px;
+            color: #2F0000;
+            cursor: pointer;
+            box-shadow: 0 6px 0 #B87C00;
+            transition: 0.05s linear;
+            font-family: inherit;
+        }
+        button:active {
+            transform: translateY(3px);
+            box-shadow: 0 3px 0 #B87C00;
+        }
+        .result {
+            margin-top: 25px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #FFD700;
+            background: #2F0000cc;
+            padding: 12px 20px;
+            border-radius: 60px;
+            border: 1px solid #FFD700;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="title">⚡ X-TEAM WHEEL ⚡</div>
+    <div class="wheel-wrapper">
+        <canvas id="wheelCanvas" width="500" height="500"></canvas>
+        <div class="pointer"></div>
+    </div>
+    <button id="spinBtn">🎡 دَوِّر</button>
+    <div class="result" id="resultText">✧ اضغط دَوِّر ✧</div>
+</div>
+
+<script>
+    (function() {
+        // جلب user_id من الرابط
+        const urlParams = new URLSearchParams(window.location.search);
+        const USER_ID = urlParams.get('user_id');
+        
+        // إرسال النتيجة إلى البوت
+        async function sendResultToBot(prizeValue) {
+            if (!USER_ID || USER_ID === '0') {
+                console.log('⚠️ لا يوجد user_id');
+                return;
+            }
+            
+            try {
+                const response = await fetch('https://YOUR_SERVER_DOMAIN.com/wheel_result', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: parseInt(USER_ID),
+                        prize: prizeValue.toString()
+                    })
+                });
+                const result = await response.json();
+                console.log('✅ تم إرسال النتيجة:', result);
+            } catch(e) {
+                console.log('❌ خطأ في الإرسال:', e);
+            }
+        }
+        
+        // الجوائز (تظهر بالتساوي على العجلة)
+        const SEGMENTS = ["200000", "50000", "10000", "5000", "1000", "500"];
+        const COLORS = ["#FFD700", "#FF4444", "#2196F3", "#4CAF50", "#FF9800", "#9C27B0"];
+        
+        // نسب حقيقية للندرة
+        const WIN_PERCENTAGES = {
+            "200000": 4,
+            "50000": 6,
+            "10000": 15,
+            "5000": 20,
+            "1000": 25,
+            "500": 30
+        };
+        
+        let canvas = document.getElementById('wheelCanvas');
+        let ctx = canvas.getContext('2d');
+        let spinning = false;
+        let currentAngle = 0;
+        let animFrame = null;
+        let spinStart = 0;
+        let spinDuration = 4000;
+        let targetAngle = 0;
+        
+        let spinBtn = document.getElementById('spinBtn');
+        let resultDiv = document.getElementById('resultText');
+        
+        // الأصوات
+        function playSpinSound() {
+            try {
+                let audio = new Audio('https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3');
+                audio.volume = 0.5;
+                audio.play();
+            } catch(e) {}
+        }
+        
+        function playWinSound() {
+            try {
+                let audio = new Audio('https://www.soundjay.com/misc/sounds/fanfare-6.mp3');
+                audio.volume = 0.6;
+                audio.play();
+            } catch(e) {}
+        }
+        
+        function shakeScreen() {
+            document.body.classList.add('shake');
+            setTimeout(() => document.body.classList.remove('shake'), 400);
+        }
+        
+        function createConfetti() {
+            for (let i=0; i<120; i++) {
+                let conf = document.createElement('div');
+                conf.style.position = 'fixed';
+                conf.style.width = Math.random()*8+5+'px';
+                conf.style.height = conf.style.width;
+                conf.style.backgroundColor = `hsl(${Math.random()*360}, 100%, 55%)`;
+                conf.style.left = Math.random()*window.innerWidth+'px';
+                conf.style.top = '-20px';
+                conf.style.borderRadius = '50%';
+                conf.style.zIndex = '9999';
+                conf.style.pointerEvents = 'none';
+                document.body.appendChild(conf);
+                let anim = conf.animate([
+                    { transform: 'translateY(0px) rotate(0deg)', opacity: 1 },
+                    { transform: `translateY(${window.innerHeight+100}px) rotate(${Math.random()*720}deg)`, opacity: 0 }
+                ], { duration: 2800 });
+                anim.onfinish = () => conf.remove();
+            }
+        }
+        
+        function drawWheel(rad) {
+            let w = canvas.width, h = canvas.height;
+            let cx = w/2, cy = h/2;
+            let radius = w * 0.44;
+            let start = rad;
+            let step = (Math.PI * 2) / SEGMENTS.length;
+            
+            ctx.clearRect(0, 0, w, h);
+            for (let i=0; i<SEGMENTS.length; i++) {
+                let end = start + step;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.arc(cx, cy, radius, start, end);
+                ctx.closePath();
+                ctx.fillStyle = COLORS[i % COLORS.length];
+                ctx.fill();
+                ctx.strokeStyle = "#fff";
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.rotate(start + step/2);
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.font = "bold 18px 'Cairo'";
+                ctx.fillStyle = "#fff";
+                ctx.fillText(SEGMENTS[i], radius * 0.7, 5);
+                ctx.restore();
+                start = end;
+            }
+            
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius*0.25, 0, Math.PI*2);
+            ctx.fillStyle = "#000000";
+            ctx.fill();
+            ctx.strokeStyle = "#FFD700";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.fillStyle = "#FFD700";
+            ctx.font = "bold 20px 'Cairo'";
+            ctx.fillText("X-TEAM", cx-52, cy+8);
+        }
+        
+        function selectPrizeByRarity() {
+            let rand = Math.random() * 100;
+            let acum = 0;
+            for (let prize of SEGMENTS) {
+                let percent = WIN_PERCENTAGES[prize];
+                acum += percent;
+                if (rand <= acum) {
+                    return prize;
+                }
+            }
+            return "500";
+        }
+        
+        function getStopAngleForPrize(prize) {
+            let step = (Math.PI * 2) / SEGMENTS.length;
+            let pointerAngle = (Math.PI * 3) / 2;
+            let index = SEGMENTS.indexOf(prize);
+            let startAngleOfSegment = index * step;
+            let midOfSegment = startAngleOfSegment + step/2;
+            let neededRotation = (pointerAngle - midOfSegment + Math.PI*2) % (Math.PI*2);
+            return neededRotation;
+        }
+        
+        function spin() {
+            if (spinning) return;
+            spinning = true;
+            spinBtn.disabled = true;
+            playSpinSound();
+            
+            let selectedPrize = selectPrizeByRarity();
+            let baseStop = getStopAngleForPrize(selectedPrize);
+            
+            let extra = Math.PI * 2 * (Math.floor(Math.random() * 8) + 10);
+            targetAngle = baseStop + extra;
+            spinStart = performance.now();
+            let startRot = currentAngle;
+            
+            function animate(now) {
+                let elapsed = now - spinStart;
+                let t = Math.min(1, elapsed / spinDuration);
+                let ease = 1 - Math.pow(1-t, 3);
+                let newAngle = startRot + (targetAngle - startRot) * ease;
+                currentAngle = newAngle % (Math.PI*2);
+                drawWheel(currentAngle);
+                
+                if (t < 1) {
+                    animFrame = requestAnimationFrame(animate);
+                } else {
+                    let finalPrize = selectedPrize;
+                    resultDiv.innerHTML = `🎉✨ ربحت ${finalPrize} نقطة ✨🎉`;
+                    
+                    // إرسال النتيجة إلى البوت
+                    sendResultToBot(finalPrize);
+                    
+                    playWinSound();
+                    shakeScreen();
+                    createConfetti();
+                    
+                    spinning = false;
+                    spinBtn.disabled = false;
+                    cancelAnimationFrame(animFrame);
+                    animFrame = null;
+                }
+            }
+            
+            if (animFrame) cancelAnimationFrame(animFrame);
+            animFrame = requestAnimationFrame(animate);
+        }
+        
+        drawWheel(0);
+        spinBtn.addEventListener('click', spin);
+    })();
+</script>
+</body>
+</html>
