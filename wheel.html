@@ -123,15 +123,43 @@
         const urlParams = new URLSearchParams(window.location.search);
         const USER_ID = urlParams.get('user_id');
         
+        // ✅ دالة التحقق من اللفات قبل الدوران
+        async function checkAndUseSpin() {
+            if (!USER_ID || USER_ID === '0') {
+                alert('⚠️ خطأ: لا يمكن تحديد حسابك. أعد فتح الرابط من البوت.');
+                return false;
+            }
+            
+            try {
+                const response = await fetch('/use_spin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: parseInt(USER_ID) })
+                });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    console.log('✅ تم خصم لفة، المتبقي:', result.remaining);
+                    return true;
+                } else {
+                    alert(result.message || '⚠️ لا توجد لفات متاحة! اشحن رصيدك أو احصل على لفات من الإحالات.');
+                    return false;
+                }
+            } catch(e) {
+                console.log('❌ خطأ في التحقق من اللفات:', e);
+                alert('⚠️ حدث خطأ في الاتصال بالخادم. تأكد من اتصالك بالإنترنت وحاول مرة أخرى.');
+                return false;
+            }
+        }
+        
         // إرسال النتيجة إلى البوت
         async function sendResultToBot(prizeValue) {
             if (!USER_ID || USER_ID === '0') {
                 console.log('⚠️ لا يوجد user_id');
                 return;
             }
-            
             try {
-                const response = await fetch('https://213.176.67.225/wheel_result', {
+                const response = await fetch('/wheel_result', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -146,11 +174,10 @@
             }
         }
         
-        // الجوائز (تظهر بالتساوي على العجلة)
+        // الجوائز
         const SEGMENTS = ["200000", "50000", "10000", "5000", "1000", "500"];
         const COLORS = ["#FFD700", "#FF4444", "#2196F3", "#4CAF50", "#FF9800", "#9C27B0"];
         
-        // نسب حقيقية للندرة
         const WIN_PERCENTAGES = {
             "200000": 4,
             "50000": 6,
@@ -172,7 +199,6 @@
         let spinBtn = document.getElementById('spinBtn');
         let resultDiv = document.getElementById('resultText');
         
-        // الأصوات
         function playSpinSound() {
             try {
                 let audio = new Audio('https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3');
@@ -282,8 +308,16 @@
             return neededRotation;
         }
         
-        function spin() {
+        // ✅ دالة الدوران الرئيسية (مع التحقق من اللفات)
+        async function spin() {
             if (spinning) return;
+            
+            // ✅ التحقق من اللفات قبل البدء
+            const canSpin = await checkAndUseSpin();
+            if (!canSpin) {
+                return;
+            }
+            
             spinning = true;
             spinBtn.disabled = true;
             playSpinSound();
@@ -309,10 +343,7 @@
                 } else {
                     let finalPrize = selectedPrize;
                     resultDiv.innerHTML = `🎉✨ ربحت ${finalPrize} نقطة ✨🎉`;
-                    
-                    // إرسال النتيجة إلى البوت
                     sendResultToBot(finalPrize);
-                    
                     playWinSound();
                     shakeScreen();
                     createConfetti();
